@@ -57,11 +57,11 @@
 #include "btif_hd.h"
 #include "btif_hf.h"
 #include "btif_hh.h"
+#include "btif_metrics_logging.h"
 #include "btif_sdp.h"
 #include "btif_storage.h"
 #include "btif_util.h"
 #include "btu.h"
-#include "common/metric_id_allocator.h"
 #include "common/metrics.h"
 #include "device/include/controller.h"
 #include "device/include/interop.h"
@@ -76,7 +76,6 @@
 #include "stack_config.h"
 
 using bluetooth::Uuid;
-using bluetooth::common::MetricIdAllocator;
 /******************************************************************************
  *  Constants & Macros
  *****************************************************************************/
@@ -448,10 +447,10 @@ static void bond_state_changed(bt_status_t status, const RawAddress& bd_addr,
       state, pairing_cb.state, pairing_cb.sdp_attempts);
 
   if (state == BT_BOND_STATE_NONE) {
-    MetricIdAllocator::GetInstance().ForgetDevice(bd_addr);
+    forget_device_from_metric_id_allocator(bd_addr);
   } else if (state == BT_BOND_STATE_BONDED) {
-    MetricIdAllocator::GetInstance().AllocateId(bd_addr);
-    if (!MetricIdAllocator::GetInstance().SaveDevice(bd_addr)) {
+    allocate_metric_id_from_metric_id_allocator(bd_addr);
+    if (!save_metric_id_from_metric_id_allocator(bd_addr)) {
       LOG(FATAL) << __func__ << ": Fail to save metric id for device "
                  << bd_addr;
     }
@@ -1543,11 +1542,16 @@ static void btif_dm_upstreams_evt(uint16_t event, char* p_param) {
       btm_set_bond_type_dev(p_data->link_down.bd_addr,
                             tBTM_SEC_DEV_REC::BOND_TYPE_UNKNOWN);
       btif_av_acl_disconnected(bd_addr);
-      BTIF_TRACE_DEBUG(
-          "BTA_DM_LINK_DOWN_EVT. Sending BT_ACL_STATE_DISCONNECTED");
       invoke_acl_state_changed_cb(BT_STATUS_SUCCESS, bd_addr,
                                   BT_ACL_STATE_DISCONNECTED,
                                   static_cast<bt_hci_error_code_t>(btm_get_acl_disc_reason_code()));
+      LOG_DEBUG(
+          "Sent BT_ACL_STATE_DISCONNECTED upward as ACL link down event "
+          "device:%s reason:%s",
+          PRIVATE_ADDRESS(bd_addr),
+          hci_reason_code_text(
+              static_cast<tHCI_REASON>(btm_get_acl_disc_reason_code()))
+              .c_str());
       break;
 
     case BTA_DM_BLE_KEY_EVT:

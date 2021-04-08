@@ -19,12 +19,14 @@ package android.bluetooth;
 import android.bluetooth.IBluetoothCallback;
 import android.bluetooth.IBluetoothConnectionCallback;
 import android.bluetooth.IBluetoothMetadataListener;
+import android.bluetooth.IBluetoothOobDataCallback;
 import android.bluetooth.IBluetoothSocketManager;
 import android.bluetooth.IBluetoothStateChangeCallback;
 import android.bluetooth.BluetoothActivityEnergyInfo;
 import android.bluetooth.BluetoothClass;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.OobData;
+import android.content.AttributionSource;
 import android.os.ParcelUuid;
 import android.os.ParcelFileDescriptor;
 import android.os.ResultReceiver;
@@ -59,7 +61,7 @@ interface IBluetooth
     int getDiscoverableTimeout();
     boolean setDiscoverableTimeout(int timeout);
 
-    boolean startDiscovery(String callingPackage, String callingFeatureId);
+    boolean startDiscovery(in AttributionSource attributionSource);
     boolean cancelDiscovery();
     boolean isDiscovering();
     long getDiscoveryEndMillis();
@@ -153,4 +155,5 @@ interface IBluetooth
     boolean unregisterBluetoothConnectionCallback(in IBluetoothConnectionCallback callback);
 
     boolean canBondWithoutDialog(in BluetoothDevice device);
+    void generateLocalOobData(in int transport, IBluetoothOobDataCallback callback);
 }

@@ -129,7 +129,7 @@ inline bool IsEprAvailable(const tACL_CONN& p_acl) {
 static void btm_acl_chk_peer_pkt_type_support(tACL_CONN* p,
                                               uint16_t* p_pkt_type);
 static void btm_process_remote_ext_features(tACL_CONN* p_acl_cb,
-                                            uint8_t num_read_pages);
+                                            uint8_t max_page_number);
 static void btm_read_failed_contact_counter_timeout(void* data);
 static void btm_read_remote_ext_features(uint16_t handle, uint8_t page_number);
 static void btm_read_rssi_timeout(void* data);
@@ -366,7 +366,7 @@ void btm_acl_created(const RawAddress& bda, uint16_t hci_handle,
         "Unable to create duplicate acl when one already exists handle:%hu"
         " role:%s transport:%s",
         hci_handle, RoleText(link_role).c_str(),
-        BtTransportText(transport).c_str());
+        bt_transport_text(transport).c_str());
     return;
   }
 
@@ -390,7 +390,7 @@ void btm_acl_created(const RawAddress& bda, uint16_t hci_handle,
   LOG_DEBUG(
       "Created new ACL connection peer:%s role:%s handle:0x%04x transport:%s",
       PRIVATE_ADDRESS(bda), RoleText(p_acl->link_role).c_str(), hci_handle,
-      BtTransportText(transport).c_str());
+      bt_transport_text(transport).c_str());
   btm_set_link_policy(p_acl, btm_cb.acl_cb_.DefaultLinkPolicy());
 
   if (transport == BT_TRANSPORT_LE) {
@@ -827,10 +827,9 @@ void btm_read_remote_version_complete(tHCI_STATUS status, uint16_t handle,
  *
  ******************************************************************************/
 void btm_process_remote_ext_features(tACL_CONN* p_acl_cb,
-                                     uint8_t num_read_pages) {
+                                     uint8_t max_page_number) {
   CHECK(p_acl_cb != nullptr);
-  if (!p_acl_cb->peer_lmp_feature_valid[0] ||
-      !p_acl_cb->peer_lmp_feature_valid[1]) {
+  if (!p_acl_cb->peer_lmp_feature_valid[max_page_number]) {
     LOG_WARN(
         "Checking remote features but remote feature read is "
         "incomplete");
@@ -951,7 +950,7 @@ void btm_read_remote_features_complete(uint16_t handle, uint8_t* features) {
 
   /* Remote controller has no extended features. Process remote controller
      supported features (features page 0). */
-  btm_process_remote_ext_features(p_acl_cb, 1);
+  btm_process_remote_ext_features(p_acl_cb, 0);
 
   /* Continue with HCI connection establishment */
   internal_.btm_establish_continue(p_acl_cb);
@@ -1028,7 +1027,7 @@ void btm_read_remote_ext_features_complete(uint16_t handle, uint8_t page_num,
   LOG_DEBUG("BTM reached last remote extended features page (%d)", page_num);
 
   /* Process the pages */
-  btm_process_remote_ext_features(p_acl_cb, (uint8_t)(page_num + 1));
+  btm_process_remote_ext_features(p_acl_cb, max_page);
 
   /* Continue with HCI connection establishment */
   internal_.btm_establish_continue(p_acl_cb);
@@ -1054,7 +1053,7 @@ void btm_read_remote_ext_features_failed(uint8_t status, uint16_t handle) {
   }
 
   /* Process supported features only */
-  btm_process_remote_ext_features(p_acl_cb, 1);
+  btm_process_remote_ext_features(p_acl_cb, 0);
 
   /* Continue HCI connection establishment */
   internal_.btm_establish_continue(p_acl_cb);
@@ -2036,7 +2035,7 @@ tBTM_STATUS btm_remove_acl(const RawAddress& bd_addr, tBT_TRANSPORT transport) {
 
   if (p_acl->Handle() == HCI_INVALID_HANDLE) {
     LOG_WARN("Cannot remove unknown acl bd_addr:%s transport:%s",
-             PRIVATE_ADDRESS(bd_addr), BtTransportText(transport).c_str());
+             PRIVATE_ADDRESS(bd_addr), bt_transport_text(transport).c_str());
     return BTM_UNKNOWN_ADDR;
   }
 
@@ -2044,7 +2043,7 @@ tBTM_STATUS btm_remove_acl(const RawAddress& bd_addr, tBT_TRANSPORT transport) {
     LOG_DEBUG(
         "Delay disconnect until role switch is complete bd_addr:%s "
         "transport:%s",
-        PRIVATE_ADDRESS(bd_addr), BtTransportText(transport).c_str());
+        PRIVATE_ADDRESS(bd_addr), bt_transport_text(transport).c_str());
     p_acl->rs_disc_pending = BTM_SEC_DISC_PENDING;
     return BTM_SUCCESS;
   }
@@ -2692,12 +2691,12 @@ constexpr uint16_t kDataPacketEventBrEdr = (BT_EVT_TO_LM_HCI_ACL);
 constexpr uint16_t kDataPacketEventBle =
     (BT_EVT_TO_LM_HCI_ACL | LOCAL_BLE_CONTROLLER_ID);
 
-void acl_send_data_packet_br_edr([[maybe_unused]] const RawAddress& bd_addr,
-                                 BT_HDR* p_buf) {
+void acl_send_data_packet_br_edr(const RawAddress& bd_addr, BT_HDR* p_buf) {
   if (bluetooth::shim::is_gd_acl_enabled()) {
     tACL_CONN* p_acl = internal_.btm_bda_to_acl(bd_addr, BT_TRANSPORT_BR_EDR);
     if (p_acl == nullptr) {
-      LOG_WARN("Acl br_edr data write for unknown device");
+      LOG_WARN("Acl br_edr data write for unknown device:%s",
+               PRIVATE_ADDRESS(bd_addr));
       return;
     }
     return bluetooth::shim::ACL_WriteData(p_acl->hci_handle, p_buf);
@@ -2709,7 +2708,8 @@ void acl_send_data_packet_ble(const RawAddress& bd_addr, BT_HDR* p_buf) {
   if (bluetooth::shim::is_gd_acl_enabled()) {
     tACL_CONN* p_acl = internal_.btm_bda_to_acl(bd_addr, BT_TRANSPORT_LE);
     if (p_acl == nullptr) {
-      LOG_WARN("Acl le data write for unknown device");
+      LOG_WARN("Acl le data write for unknown device:%s",
+               PRIVATE_ADDRESS(bd_addr));
       return;
     }
     return bluetooth::shim::ACL_WriteData(p_acl->hci_handle, p_buf);

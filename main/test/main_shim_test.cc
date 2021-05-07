@@ -21,6 +21,7 @@
 #include <map>
 #include <thread>
 
+#include "btif/include/btif_hh.h"
 #include "device/include/controller.h"
 #include "gd/btaa/activity_attribution.h"
 #include "gd/hal/hci_hal.h"
@@ -45,13 +46,13 @@
 #include "main/shim/acl.h"
 #include "main/shim/acl_legacy_interface.h"
 #include "main/shim/helpers.h"
-#include "main/test/common/main_handler.h"
-#include "main/test/common/mock_entry.h"
 #include "os/handler.h"
 #include "os/thread.h"
 #include "stack/btm/btm_int_types.h"
 #include "stack/include/btu.h"
 #include "stack/l2cap/l2c_int.h"
+#include "test/common/main_handler.h"
+#include "test/mock/mock_main_shim_entry.h"
 
 using namespace bluetooth;
 using namespace testing;
@@ -62,6 +63,7 @@ const uint8_t kMaxLeAcceptlistSize = 16;
 std::map<std::string, int> mock_function_count_map;
 tL2C_CB l2cb;
 tBTM_CB btm_cb;
+btif_hh_cb_t btif_hh_cb;
 
 namespace {
 std::map<std::string, std::promise<uint16_t>> mock_function_handle_promise_map;

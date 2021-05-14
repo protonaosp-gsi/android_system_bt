@@ -314,7 +314,8 @@ void bta_hh_start_sdp(tBTA_HH_DEV_CB* p_cb, const tBTA_HH_DATA* p_data) {
   p_cb->mode = p_data->api_conn.mode;
   bta_hh_cb.p_cur = p_cb;
 
-  if (bta_hh_is_le_device(p_cb, p_data->api_conn.bd_addr)) {
+  if (BTM_UseLeLink(p_data->api_conn.bd_addr)) {
+    p_cb->is_le_device = true;
     bta_hh_le_open_conn(p_cb, p_data->api_conn.bd_addr);
     return;
   }
@@ -932,7 +933,8 @@ void bta_hh_maint_dev_act(tBTA_HH_DEV_CB* p_cb, const tBTA_HH_DATA* p_data) {
       dev_info.bda = p_dev_info->bda;
       /* initialize callback data */
       if (p_cb->hid_handle == BTA_HH_INVALID_HANDLE) {
-        if (bta_hh_is_le_device(p_cb, p_data->api_conn.bd_addr)) {
+        if (BTM_UseLeLink(p_data->api_conn.bd_addr)) {
+          p_cb->is_le_device = true;
           dev_info.handle = bta_hh_le_add_device(p_cb, p_dev_info);
           if (dev_info.handle != BTA_HH_INVALID_HANDLE)
             dev_info.status = BTA_HH_OK;
@@ -1012,8 +1014,8 @@ static uint8_t convert_api_sndcmd_param(const tBTA_HH_CMD_DATA& api_sndcmd) {
 
 void bta_hh_write_dev_act(tBTA_HH_DEV_CB* p_cb, const tBTA_HH_DATA* p_data) {
   tBTA_HH_CBDATA cbdata = {BTA_HH_OK, 0};
-  uint16_t event = (p_data->api_sndcmd.t_type - BTA_HH_FST_BTE_TRANS_EVT) +
-                   BTA_HH_FST_TRANS_CB_EVT;
+  uint16_t event =
+      (p_data->api_sndcmd.t_type - HID_TRANS_GET_REPORT) + BTA_HH_GET_RPT_EVT;
 
   if (p_cb->is_le_device)
     bta_hh_le_write_dev_act(p_cb, p_data);

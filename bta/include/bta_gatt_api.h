@@ -119,13 +119,9 @@ typedef struct {
   uint8_t* p_value;
 } tBTA_GATT_UNFMT;
 
-typedef uint16_t tBTA_GATT_REASON;
-
-#define BTA_GATTC_MULTI_MAX GATT_MAX_READ_MULTI_HANDLES
-
 typedef struct {
   uint8_t num_attr;
-  uint16_t handles[BTA_GATTC_MULTI_MAX];
+  uint16_t handles[GATT_MAX_READ_MULTI_HANDLES];
 } tBTA_GATTC_MULTI;
 
 /* callback data structure */
@@ -183,8 +179,7 @@ typedef struct {
   tGATT_STATUS status;
   tGATT_IF client_if;
   RawAddress remote_bda;
-  tBTA_GATT_REASON reason; /* disconnect reason code, not useful when connect
-                              event is reported */
+  tGATT_DISCONN_REASON reason;
 } tBTA_GATTC_CLOSE;
 
 typedef struct {

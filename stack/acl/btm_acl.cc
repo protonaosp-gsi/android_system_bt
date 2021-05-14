@@ -96,9 +96,14 @@ struct StackAclBtmAcl {
   }
 };
 
+struct RoleChangeView {
+  tHCI_ROLE new_role = HCI_ROLE_UNKNOWN;
+  RawAddress bd_addr;
+};
+
 namespace {
 StackAclBtmAcl internal_;
-
+std::unique_ptr<RoleChangeView> delayed_role_change_ = nullptr;
 const bluetooth::legacy::hci::Interface& GetLegacyHciInterface() {
   return bluetooth::legacy::hci::GetInterface();
 }
@@ -1117,14 +1122,15 @@ void btm_establish_continue_from_address(const RawAddress& bda,
  ******************************************************************************/
 tBTM_STATUS BTM_GetLinkSuperTout(const RawAddress& remote_bda,
                                  uint16_t* p_timeout) {
-  tACL_CONN* p = internal_.btm_bda_to_acl(remote_bda, BT_TRANSPORT_BR_EDR);
-  if (p != (tACL_CONN*)NULL) {
-    *p_timeout = p->link_super_tout;
-    return (BTM_SUCCESS);
+  CHECK(p_timeout != nullptr);
+  const tACL_CONN* p_acl =
+      internal_.btm_bda_to_acl(remote_bda, BT_TRANSPORT_BR_EDR);
+  if (p_acl == nullptr) {
+    LOG_WARN("Unable to find active acl");
+    return BTM_UNKNOWN_ADDR;
   }
-  LOG_WARN("Unable to find active acl");
-  /* If here, no BD Addr found */
-  return (BTM_UNKNOWN_ADDR);
+  *p_timeout = p_acl->link_super_tout;
+  return BTM_SUCCESS;
 }
 
 /*******************************************************************************
@@ -1138,31 +1144,28 @@ tBTM_STATUS BTM_GetLinkSuperTout(const RawAddress& remote_bda,
  ******************************************************************************/
 tBTM_STATUS BTM_SetLinkSuperTout(const RawAddress& remote_bda,
                                  uint16_t timeout) {
-  tACL_CONN* p = internal_.btm_bda_to_acl(remote_bda, BT_TRANSPORT_BR_EDR);
-  if (p != (tACL_CONN*)NULL) {
-    p->link_super_tout = timeout;
-
-    /* Only send if current role is Central; 2.0 spec requires this */
-    if (p->link_role == HCI_ROLE_CENTRAL) {
-      LOG_DEBUG("Setting supervison timeout:%.2fms bd_addr:%s",
-                supervision_timeout_to_seconds(timeout),
-                PRIVATE_ADDRESS(remote_bda));
-
-      btsnd_hcic_write_link_super_tout(LOCAL_BR_EDR_CONTROLLER_ID,
-                                       p->hci_handle, timeout);
-      return (BTM_CMD_STARTED);
-    } else {
-      LOG_WARN(
-          "Role is peripheral so unable to set supervison timeout:%.2fms "
-          "bd_addr:%s",
-          supervision_timeout_to_seconds(timeout), PRIVATE_ADDRESS(remote_bda));
-      return (BTM_SUCCESS);
-    }
+  tACL_CONN* p_acl = internal_.btm_bda_to_acl(remote_bda, BT_TRANSPORT_BR_EDR);
+  if (p_acl == nullptr) {
+    LOG_WARN("Unable to find active acl");
+    return BTM_UNKNOWN_ADDR;
   }
-  LOG_WARN("Unable to find active acl");
 
-  /* If here, no BD Addr found */
-  return (BTM_UNKNOWN_ADDR);
+  /* Only send if current role is Central; 2.0 spec requires this */
+  if (p_acl->link_role == HCI_ROLE_CENTRAL) {
+    p_acl->link_super_tout = timeout;
+    btsnd_hcic_write_link_super_tout(LOCAL_BR_EDR_CONTROLLER_ID,
+                                     p_acl->hci_handle, timeout);
+    LOG_DEBUG("Set supervision timeout:%.2fms bd_addr:%s",
+              supervision_timeout_to_seconds(timeout),
+              PRIVATE_ADDRESS(remote_bda));
+    return BTM_CMD_STARTED;
+  } else {
+    LOG_WARN(
+        "Role is peripheral so unable to set supervision timeout:%.2fms "
+        "bd_addr:%s",
+        supervision_timeout_to_seconds(timeout), PRIVATE_ADDRESS(remote_bda));
+    return BTM_SUCCESS;
+  }
 }
 
 bool BTM_IsAclConnectionUp(const RawAddress& remote_bda,
@@ -1382,6 +1385,13 @@ void StackAclBtmAcl::btm_acl_role_changed(tHCI_STATUS hci_status,
                                           tHCI_ROLE new_role) {
   tACL_CONN* p_acl = internal_.btm_bda_to_acl(bd_addr, BT_TRANSPORT_BR_EDR);
   if (p_acl == nullptr) {
+    // If we get a role change before connection complete, we cache the new
+    // role here and then propagate it when ACL Link is created.
+    RoleChangeView role_change;
+    role_change.new_role = new_role;
+    role_change.bd_addr = bd_addr;
+    delayed_role_change_ =
+        std::make_unique<RoleChangeView>(std::move(role_change));
     LOG_WARN("Unable to find active acl");
     return;
   }
@@ -2182,6 +2192,16 @@ void btm_acl_reset_paging(void) {
  *
  ******************************************************************************/
 void btm_acl_paging(BT_HDR* p, const RawAddress& bda) {
+  // This function is called by the device initiating the connection.
+  // If no role change is requested from the remote device, we want
+  // to classify the connection initiator as the central device.
+  if (delayed_role_change_ == nullptr) {
+    RoleChangeView role_change;
+    role_change.bd_addr = bda;
+    role_change.new_role = HCI_ROLE_CENTRAL;
+    delayed_role_change_ =
+        std::make_unique<RoleChangeView>(std::move(role_change));
+  }
   if (!BTM_IsAclConnectionUp(bda, BT_TRANSPORT_BR_EDR)) {
     VLOG(1) << "connecting_bda: " << btm_cb.connecting_bda;
     if (btm_cb.paging && bda == btm_cb.connecting_bda) {
@@ -2522,7 +2542,13 @@ bool acl_set_peer_le_features_from_handle(uint16_t hci_handle,
 
 void on_acl_br_edr_connected(const RawAddress& bda, uint16_t handle,
                              uint8_t enc_mode) {
-  btm_sec_connected(bda, handle, HCI_SUCCESS, enc_mode);
+  if (delayed_role_change_ != nullptr && delayed_role_change_->bd_addr == bda) {
+    btm_sec_connected(bda, handle, HCI_SUCCESS, enc_mode,
+                      delayed_role_change_->new_role);
+  } else {
+    btm_sec_connected(bda, handle, HCI_SUCCESS, enc_mode);
+  }
+  delayed_role_change_ = nullptr;
   btm_acl_set_paging(false);
   l2c_link_hci_conn_comp(HCI_SUCCESS, handle, bda);
   constexpr uint16_t link_supervision_timeout = 8000;
@@ -2548,8 +2574,13 @@ void on_acl_br_edr_connected(const RawAddress& bda, uint16_t handle,
 void on_acl_br_edr_failed(const RawAddress& bda, tHCI_STATUS status) {
   ASSERT_LOG(status != HCI_SUCCESS,
              "Successful connection entering failing code path");
-
-  btm_sec_connected(bda, HCI_INVALID_HANDLE, status, false);
+  if (delayed_role_change_ != nullptr && delayed_role_change_->bd_addr == bda) {
+    btm_sec_connected(bda, HCI_INVALID_HANDLE, status, false,
+                      delayed_role_change_->new_role);
+  } else {
+    btm_sec_connected(bda, HCI_INVALID_HANDLE, status, false);
+  }
+  delayed_role_change_ = nullptr;
   btm_acl_set_paging(false);
   l2c_link_hci_conn_comp(status, HCI_INVALID_HANDLE, bda);
 }
@@ -2729,7 +2760,8 @@ bool acl_create_le_connection_with_id(uint8_t id, const RawAddress& bd_addr) {
     gatt_find_in_device_record(bd_addr, &address_with_type);
     LOG_DEBUG("Creating le connection to:%s",
               address_with_type.ToString().c_str());
-    bluetooth::shim::ACL_AcceptLeConnectionFrom(address_with_type);
+    bluetooth::shim::ACL_AcceptLeConnectionFrom(address_with_type,
+                                                /* is_direct */ true);
     return true;
   }
   return connection_manager::direct_connect_add(id, bd_addr);

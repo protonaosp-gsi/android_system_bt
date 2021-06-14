@@ -38,6 +38,7 @@ cc_library_static {
     ],
     include_dirs: [
         "system/bt",
+        "system/bt/gd",
         "system/bt/internal_include",
         "system/bt/btcore/include",
         "system/bt/stack/include",
@@ -109,6 +110,7 @@ cc_test {
     ],
     include_dirs: [
         "system/bt",
+        "system/bt/gd",
         "system/bt/stack/include",
     ],
     srcs: [
@@ -146,6 +148,7 @@ cc_test {
     ],
     include_dirs: [
         "system/bt",
+        "system/bt/gd",
         "system/bt/stack/include",
         "system/bt/btcore/include",
         "system/bt/osi/test",

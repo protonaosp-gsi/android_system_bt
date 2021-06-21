@@ -46,10 +46,11 @@
 #include "btif_util.h"
 #include "btu.h"
 #include "device/include/interop.h"
-#include "log/log.h"
 #include "osi/include/list.h"
+#include "osi/include/log.h"
 #include "osi/include/osi.h"
 #include "osi/include/properties.h"
+#include "stack/include/avrc_api.h"
 
 #define RC_INVALID_TRACK_ID (0xFFFFFFFFFFFFFFFFULL)
 
@@ -666,6 +667,7 @@ void handle_rc_connect(tBTA_AV_RC_OPEN* p_rc_open) {
     BTIF_TRACE_ERROR("%s: Connect failed with error code: %d", __func__,
                      p_rc_open->status);
     p_dev->rc_connected = false;
+    return;
   }
 
   // check if already some RC is connected
@@ -1441,7 +1443,7 @@ static uint8_t opcode_from_pdu(uint8_t pdu) {
  *
  ***************************************************************************/
 static uint8_t fill_attribute_id_array(
-    uint8_t cmd_attribute_number, btrc_media_attr_t* cmd_attribute_id_array,
+    uint8_t cmd_attribute_number, const uint32_t* cmd_attribute_id_array,
     size_t out_array_size, btrc_media_attr_t* out_attribute_id_array) {
   /* Default case for cmd_attribute_number == 0xFF, No attribute */
   uint8_t out_attribute_number = 0;
@@ -1516,8 +1518,7 @@ static void btif_rc_upstreams_evt(uint16_t event, tAVRC_COMMAND* pavrc_cmd,
     case AVRC_PDU_GET_ELEMENT_ATTR: {
       btrc_media_attr_t element_attrs[BTRC_MAX_ELEM_ATTR_SIZE] = {};
       uint8_t num_attr = fill_attribute_id_array(
-          pavrc_cmd->get_elem_attrs.num_attr,
-          (btrc_media_attr_t*)pavrc_cmd->get_elem_attrs.attrs,
+          pavrc_cmd->get_elem_attrs.num_attr, pavrc_cmd->get_elem_attrs.attrs,
           BTRC_MAX_ELEM_ATTR_SIZE, element_attrs);
       if (num_attr == 0) {
         BTIF_TRACE_ERROR(
@@ -1654,8 +1655,7 @@ static void btif_rc_upstreams_evt(uint16_t event, tAVRC_COMMAND* pavrc_cmd,
     case AVRC_PDU_GET_ITEM_ATTRIBUTES: {
       btrc_media_attr_t item_attrs[BTRC_MAX_ELEM_ATTR_SIZE] = {};
       uint8_t num_attr = fill_attribute_id_array(
-          pavrc_cmd->get_attrs.attr_count,
-          (btrc_media_attr_t*)pavrc_cmd->get_attrs.p_attr_list,
+          pavrc_cmd->get_attrs.attr_count, pavrc_cmd->get_attrs.p_attr_list,
           BTRC_MAX_ELEM_ATTR_SIZE, item_attrs);
       if (num_attr == 0) {
         BTIF_TRACE_ERROR(
@@ -2839,6 +2839,12 @@ bool iterate_supported_event_list_for_timeout(void* data, void* cb_data) {
  **************************************************************************/
 static void rc_notification_interim_timout(uint8_t label,
                                            btif_rc_device_cb_t* p_dev) {
+  /* Device disconnections clear the event list but can't free the timer */
+  if (p_dev == NULL || p_dev->rc_supported_event_list) {
+    BTIF_TRACE_WARNING("%s: timeout for null device or event list", __func__);
+    return;
+  }
+
   list_node_t* node;
   rc_context_t cntxt;
   memset(&cntxt, 0, sizeof(rc_context_t));
@@ -4265,6 +4271,11 @@ static void handle_change_path_response(tBTA_AV_META_MSG* pmeta_msg,
   btif_rc_device_cb_t* p_dev =
       btif_rc_get_device_by_handle(pmeta_msg->rc_handle);
 
+  if (p_dev == NULL) {
+    BTIF_TRACE_ERROR("%s: Invalid rc handle", __func__);
+    return;
+  }
+
   if (p_rsp->status == AVRC_STS_NO_ERROR) {
     do_in_jni_thread(FROM_HERE,
                      base::Bind(bt_rc_ctrl_callbacks->change_folder_path_cb,
@@ -4288,6 +4299,11 @@ static void handle_set_browsed_player_response(tBTA_AV_META_MSG* pmeta_msg,
                                                tAVRC_SET_BR_PLAYER_RSP* p_rsp) {
   btif_rc_device_cb_t* p_dev =
       btif_rc_get_device_by_handle(pmeta_msg->rc_handle);
+
+  if (p_dev == NULL) {
+    BTIF_TRACE_ERROR("%s: Invalid rc handle", __func__);
+    return;
+  }
 
   if (p_rsp->status == AVRC_STS_NO_ERROR) {
     do_in_jni_thread(

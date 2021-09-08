@@ -418,6 +418,7 @@ cc_test {
         "system/bt/utils/include",
     ],
     srcs: [
+        ":TestMockDevice",
         "btm/btm_ble_multi_adv.cc",
         "test/ble_advertiser_test.cc",
     ],

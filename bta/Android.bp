@@ -184,7 +184,6 @@ cc_test {
         "system/bt/gd",
     ],
     generated_headers: [
-        "BluetoothGeneratedBundlerSchema_h_bfbs",
         "BluetoothGeneratedDumpsysDataSchema_h",
         "BluetoothGeneratedPackets_h",
     ],
